@@ -5809,7 +5809,7 @@ static CallWideningDecision decideCallWidening(VPInstruction &VPI,
 
   // Prefer the intrinsic if it is at least as cheap as scalarizing and any
   // available vector variant.
-  if (ID) {
+  if (ID && canWidenFPBuiltinCall(*CI, VF, &CostCtx.TLI)) {
     InstructionCost IntrinsicCost =
         VPWidenIntrinsicRecipe::computeCallCost(ID, Ops, VPI, VF, CostCtx);
     if (IntrinsicCost.isValid() && ScalarCost >= IntrinsicCost &&

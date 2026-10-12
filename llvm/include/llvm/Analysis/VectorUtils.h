@@ -178,6 +178,10 @@ LLVM_ABI bool isVectorIntrinsicWithStructReturnOverloadAtField(
 LLVM_ABI Intrinsic::ID
 getVectorIntrinsicIDForCall(const CallInst *CI, const TargetLibraryInfo *TLI);
 
+/// Returns true if CI can be widened to vectorization factor VF.
+LLVM_ABI bool canWidenFPBuiltinCall(const CallInst &CI, ElementCount VF,
+                                    const TargetLibraryInfo *TLI);
+
 /// Returns the corresponding factor of llvm.vector.interleaveN intrinsics.
 LLVM_ABI unsigned getInterleaveIntrinsicFactor(Intrinsic::ID ID);
 

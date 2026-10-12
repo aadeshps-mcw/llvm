@@ -271,6 +271,16 @@ public:
   StringRef
   selectFPBuiltinImplementation(const FPBuiltinIntrinsic *Builtin) const;
 
+  /// Same as above, but for vectorization factor VF instead of
+  /// Builtin's own.
+  LLVM_ABI StringRef selectFPBuiltinImplementation(
+      const FPBuiltinIntrinsic *Builtin, ElementCount VF) const;
+
+  /// Returns true if an alternate math library implementation of Builtin
+  /// exists at vectorization factor VF
+  LLVM_ABI bool isFPBuiltinVFSupported(const FPBuiltinIntrinsic *Builtin,
+                                       ElementCount VF) const;
+
   /// Returns the replacement choice for the given FPBuiltinIntrinsic call.
   FPBuiltinReplacement
   selectFnForFPBuiltinCalls(const FPBuiltinIntrinsic &BuiltinCall,
@@ -718,6 +728,13 @@ public:
   selectFnForFPBuiltinCalls(const FPBuiltinIntrinsic &BuiltinCall,
                             const TargetTransformInfo &TTI) const {
     return Impl->selectFnForFPBuiltinCalls(BuiltinCall, TTI);
+  }
+
+  /// Returns true if an alternate math library implementation of Builtin
+  /// exists at vectorization factor VF
+  bool isFPBuiltinVFSupported(const FPBuiltinIntrinsic &Builtin,
+                              ElementCount VF) const {
+    return Impl->isFPBuiltinVFSupported(&Builtin, VF);
   }
 };
 

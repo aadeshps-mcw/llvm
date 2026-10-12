@@ -16,6 +16,8 @@
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/Passes.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/IntrinsicInst.h"
@@ -182,6 +184,48 @@ replaceWithApproxNVPTXCallsOrFallback(FPBuiltinIntrinsic &BuiltinCall,
 
 static bool selectFnForFPBuiltinCalls(const TargetLibraryInfo &TLI,
                                       const TargetTransformInfo &TTI,
+                                      FPBuiltinIntrinsic &BuiltinCall);
+
+static bool scalarizeFPBuiltinCall(const TargetLibraryInfo &TLI,
+                                   const TargetTransformInfo &TTI,
+                                   FPBuiltinIntrinsic &BuiltinCall) {
+  auto *VecTy = dyn_cast<FixedVectorType>(BuiltinCall.getType());
+  if (!VecTy)
+    return false;
+
+  Type *ScalarTy = VecTy->getElementType();
+  Module *M = BuiltinCall.getModule();
+  Function *ScalarFn = Intrinsic::getOrInsertDeclaration(
+      M, BuiltinCall.getIntrinsicID(), {ScalarTy});
+
+  IRBuilder<> IRBuilder(&BuiltinCall);
+  SmallVector<OperandBundleDef, 1> OpBundles;
+  BuiltinCall.getOperandBundlesAsDefs(OpBundles);
+
+  Value *Result = PoisonValue::get(VecTy);
+  for (unsigned Lane = 0, NumElts = VecTy->getNumElements(); Lane != NumElts;
+       ++Lane) {
+    SmallVector<Value *> ScalarArgs;
+    for (Value *Arg : BuiltinCall.args())
+      ScalarArgs.push_back(Arg->getType()->isVectorTy()
+                               ? IRBuilder.CreateExtractElement(Arg, Lane)
+                               : Arg);
+    CallInst *ScalarCall =
+        IRBuilder.CreateCall(ScalarFn, ScalarArgs, OpBundles);
+    ScalarCall->copyFastMathFlags(&BuiltinCall);
+    FPBuiltinIntrinsic::copyFPAttrs(BuiltinCall, *ScalarCall);
+    Result = IRBuilder.CreateInsertElement(Result, ScalarCall, Lane);
+    if (!selectFnForFPBuiltinCalls(TLI, TTI,
+                                   *cast<FPBuiltinIntrinsic>(ScalarCall)))
+      return false;
+    ScalarCall->eraseFromParent();
+  }
+  BuiltinCall.replaceAllUsesWith(Result);
+  return true;
+}
+
+static bool selectFnForFPBuiltinCalls(const TargetLibraryInfo &TLI,
+                                      const TargetTransformInfo &TTI,
                                       FPBuiltinIntrinsic &BuiltinCall) {
   LLVM_DEBUG({
     dbgs() << "Selecting an implementation for "
@@ -215,6 +259,8 @@ static bool selectFnForFPBuiltinCalls(const TargetLibraryInfo &TLI,
   }
   case FPBuiltinReplacement::NoSuitableReplacement: {
     LLVM_DEBUG(dbgs() << "No matching implementation found!\n");
+    if (scalarizeFPBuiltinCall(TLI, TTI, BuiltinCall))
+      return true;
     std::string RequiredAccuracy;
     if (BuiltinCall.getRequiredAccuracy() == std::nullopt)
       RequiredAccuracy = "(none)";

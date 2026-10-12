@@ -18,15 +18,18 @@
 #include "llvm/Analysis/LoopIterator.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionExpressions.h"
+#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/MemoryModelRelaxationAnnotations.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/TargetParser/Triple.h"
 
 #define DEBUG_TYPE "vectorutils"
 
@@ -124,6 +127,9 @@ bool llvm::isTriviallyVectorizable(Intrinsic::ID ID) {
   case Intrinsic::scmp:
   case Intrinsic::clmul:
     return true;
+#define OPERATION(NAME, INTRINSIC) case Intrinsic::INTRINSIC:
+#include "llvm/IR/FPBuiltinOps.def"
+    return ID != Intrinsic::fpbuiltin_sincos;
   default:
     return false;
   }
@@ -238,9 +244,23 @@ Intrinsic::ID llvm::getVectorIntrinsicIDForCall(const CallInst *CI,
   if (isTriviallyVectorizable(ID) || ID == Intrinsic::lifetime_start ||
       ID == Intrinsic::lifetime_end || ID == Intrinsic::assume ||
       ID == Intrinsic::experimental_noalias_scope_decl ||
-      ID == Intrinsic::sideeffect || ID == Intrinsic::pseudoprobe)
+      ID == Intrinsic::sideeffect || ID == Intrinsic::pseudoprobe) {
+    if (isa<FPBuiltinIntrinsic>(CI) &&
+        Triple(CI->getModule()->getTargetTriple()).isSPIR())
+      return Intrinsic::not_intrinsic;
     return ID;
+  }
   return Intrinsic::not_intrinsic;
+}
+
+bool llvm::canWidenFPBuiltinCall(const CallInst &CI, ElementCount VF,
+                                 const TargetLibraryInfo *TLI) {
+  auto *FPBI = dyn_cast<FPBuiltinIntrinsic>(&CI);
+  if (!FPBI)
+    return true;
+  if (FPBuiltinIntrinsic::hasDefaultIRFallback(FPBI->getIntrinsicID()))
+    return true;
+  return TLI && TLI->isFPBuiltinVFSupported(*FPBI, VF);
 }
 
 unsigned llvm::getInterleaveIntrinsicFactor(Intrinsic::ID ID) {
