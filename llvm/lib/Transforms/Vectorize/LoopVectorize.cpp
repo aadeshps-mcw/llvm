@@ -2120,7 +2120,8 @@ LoopVectorizationCostModel::getVectorCallCost(CallInst *CI,
 
   // The call may be vectorized at this VF, via a vector intrinsic or a vector
   // library variant.
-  if (getVectorIntrinsicIDForCall(CI, TLI))
+  if (getVectorIntrinsicIDForCall(CI, TLI) &&
+      canWidenFPBuiltinCall(*CI, VF, TLI))
     Cost = std::min(Cost, getVectorIntrinsicCost(CI, VF));
 
   if (Function *Variant =

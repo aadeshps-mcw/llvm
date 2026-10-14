@@ -1310,44 +1310,43 @@ void TargetLibraryInfoImpl::addAltMathFunctionsFromLib(
   }
 }
 
-/// Select an alternate math library implementation that meets the criteria
-/// described by an FPBuiltinIntrinsic call.
 StringRef TargetLibraryInfoImpl::selectFPBuiltinImplementation(
-    const FPBuiltinIntrinsic *Builtin) const {
+    const FPBuiltinIntrinsic *Builtin, ElementCount VF) const {
   // TODO: Handle the case of no specified accuracy.
   if (Builtin->getRequiredAccuracy() == std::nullopt)
     return StringRef();
-  AltMathDesc RequiredDesc = {
-      Builtin->getIntrinsicID(), Builtin->getBaseTypeID(),
-      Builtin->getElementCount(), "", Builtin->getRequiredAccuracy().value()};
+  AltMathDesc RequiredDesc = {Builtin->getIntrinsicID(),
+                              Builtin->getBaseTypeID(), VF, "",
+                              Builtin->getRequiredAccuracy().value()};
   std::vector<AltMathDesc>::const_iterator I =
       llvm::lower_bound(AltMathFuncDescs, RequiredDesc, compareAltMathDescs);
   if (I == AltMathFuncDescs.end())
     return StringRef(); // TODO: Report fatal error?
-  // No match found
+  // Width must be checked explicitly
   if (I->IntrinID != Builtin->getIntrinsicID() ||
       I->BaseFPType != Builtin->getBaseTypeID() ||
+      I->VectorizationFactor != VF ||
       I->Accuracy > Builtin->getRequiredAccuracy().value())
     return StringRef(); // TODO: Report fatal error?
   return I->FnImplName;
+}
+
+StringRef TargetLibraryInfoImpl::selectFPBuiltinImplementation(
+    const FPBuiltinIntrinsic *Builtin) const {
+  return selectFPBuiltinImplementation(Builtin, Builtin->getElementCount());
+}
+
+bool TargetLibraryInfoImpl::isFPBuiltinVFSupported(
+    const FPBuiltinIntrinsic *Builtin, ElementCount VF) const {
+  return !selectFPBuiltinImplementation(Builtin, VF).empty();
 }
 
 FPBuiltinReplacement TargetLibraryInfoImpl::selectFnForFPBuiltinCalls(
     const FPBuiltinIntrinsic &BuiltinCall,
     const TargetTransformInfo &TTI) const {
   auto DefaultOpIsCorrectlyRounded = [](const FPBuiltinIntrinsic &BuiltinCall) {
-    switch (BuiltinCall.getIntrinsicID()) {
-    case Intrinsic::fpbuiltin_fadd:
-    case Intrinsic::fpbuiltin_fsub:
-    case Intrinsic::fpbuiltin_fmul:
-    case Intrinsic::fpbuiltin_fdiv:
-    case Intrinsic::fpbuiltin_frem:
-    case Intrinsic::fpbuiltin_sqrt:
-    case Intrinsic::fpbuiltin_ldexp:
-      return true;
-    default:
-      return false;
-    }
+    return FPBuiltinIntrinsic::hasDefaultIRFallback(
+        BuiltinCall.getIntrinsicID());
   };
   StringSet<> RecognizedAttrs = {FPBuiltinIntrinsic::FPBUILTIN_MAX_ERROR};
   if (BuiltinCall.hasUnrecognizedFPAttrs(std::move(RecognizedAttrs)))

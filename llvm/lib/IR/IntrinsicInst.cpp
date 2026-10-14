@@ -320,6 +320,41 @@ bool FPBuiltinIntrinsic::hasUnrecognizedFPAttrs(
   return false;
 }
 
+static SmallVector<Attribute, 2> getFPAttrs(const CallBase &CB) {
+  SmallVector<Attribute, 2> Attrs;
+  if (!isa<FPBuiltinIntrinsic>(CB))
+    return Attrs;
+  for (const Attribute &Attr : CB.getAttributes().getFnAttrs())
+    if (Attr.isStringAttribute() && Attr.getKindAsString().starts_with(
+                                        FPBuiltinIntrinsic::FPBUILTIN_PREFIX))
+      Attrs.push_back(Attr);
+  return Attrs;
+}
+
+bool FPBuiltinIntrinsic::haveSameFPAttrs(const CallBase &A, const CallBase &B) {
+  return getFPAttrs(A) == getFPAttrs(B);
+}
+
+void FPBuiltinIntrinsic::copyFPAttrs(const CallBase &From, CallBase &To) {
+  for (const Attribute &Attr : getFPAttrs(From))
+    To.addFnAttr(Attr);
+}
+
+bool FPBuiltinIntrinsic::hasDefaultIRFallback(Intrinsic::ID ID) {
+  switch (ID) {
+  case Intrinsic::fpbuiltin_fadd:
+  case Intrinsic::fpbuiltin_fsub:
+  case Intrinsic::fpbuiltin_fmul:
+  case Intrinsic::fpbuiltin_fdiv:
+  case Intrinsic::fpbuiltin_frem:
+  case Intrinsic::fpbuiltin_sqrt:
+  case Intrinsic::fpbuiltin_ldexp:
+    return true;
+  default:
+    return false;
+  }
+}
+
 bool FPBuiltinIntrinsic::classof(const IntrinsicInst *I) {
   switch (I->getIntrinsicID()) {
 #define OPERATION(NAME, INTRINSIC) case Intrinsic::INTRINSIC:
